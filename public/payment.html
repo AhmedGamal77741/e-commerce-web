@@ -1,30 +1,54 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="UTF-8">
   <meta name="referrer" content="origin">
+  <title>Subscription Payment</title>
 </head>
 <body>
   <div id="resultMsg"></div>
 
+  <!-- Payple GPay widget -->
   <script src="https://demo-gpay.payple.kr/common/js/gpay-1.0.1.js"></script>
   <script>
-    // Helper to read ?token=…&amount=…&orderId=…
-    const params = new URLSearchParams(location.search);
-    const accessToken = params.get("token");
-    const amount      = params.get("amount");
-    const orderId     = params.get("orderId");
+    async function initPayment() {
+      try {
+        // 1) get query params
+        const params     = new URLSearchParams(location.search);
+        const amount     = params.get('amount');
+        const orderId    = params.get('orderId');
 
-    window.addEventListener("load", () => {
-      paypleGpayPaymentRequest({
-        Authorization: accessToken,
-        service_id:    "demo",
-        comments:      "Monthly Subscription",
-        totalAmount:   amount,
-        currency:      "USD",
-        resultUrl:     location.origin + "/api/result",
-        payCls:        "demo"
-      });
-    });
+        if (!amount || !orderId) {
+          throw new Error("Missing amount or orderId");
+        }
+
+        // 2) fetch your Cloud Function for the OAuth token
+        const authRes = await fetch('/api/authenticate');
+        if (!authRes.ok) throw new Error("Auth failed: " + authRes.status);
+        const { accessToken } = await authRes.json();
+
+        // 3) call the Payple widget with Authorization
+        const obj = {
+          Authorization: accessToken,
+          service_id:    "demo",
+          comments:      "Monthly Subscription",
+          totalAmount:   amount,
+          currency:      "USD",
+          resultUrl:     location.origin + "/api/callback",
+          payCls:        "demo",
+          // include your orderId under the correct field
+          PCD_PAY_OID:   orderId
+        };
+        paypleGpayPaymentRequest(obj);
+
+      } catch (err) {
+        // show errors on screen
+        document.getElementById('resultMsg')
+          .innerHTML = <p style="color:red">${err.message}</p>;
+      }
+    }
+
+    window.addEventListener('load', initPayment);
   </script>
 </body>
 </html>
