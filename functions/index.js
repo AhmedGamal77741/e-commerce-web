@@ -41,11 +41,13 @@ exports.paymentCallback = functions.https.onRequest((req, res) => {
     .status(200)
     .set("Content-Type", "text/html")
     .send(
+      `
       <script>
         // Serialize the payload into query params
         const params = new URLSearchParams(${JSON.stringify(data)}).toString();
         // Redirect to Flutter’s paymentresult:// scheme
         location.href = "paymentresult://callback?" + params;
       </script>
+      `
   );
 });
