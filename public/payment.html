@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="referrer" content="origin">
+</head>
+<body>
+  <div id="resultMsg"></div>
+
+  <script src="https://demo-gpay.payple.kr/common/js/gpay-1.0.1.js"></script>
+  <script>
+    // Helper to read ?token=…&amount=…&orderId=…
+    const params = new URLSearchParams(location.search);
+    const accessToken = params.get("token");
+    const amount      = params.get("amount");
+    const orderId     = params.get("orderId");
+
+    window.addEventListener("load", () => {
+      paypleGpayPaymentRequest({
+        Authorization: accessToken,
+        service_id:    "demo",
+        comments:      "Monthly Subscription",
+        totalAmount:   amount,
+        currency:      "USD",
+        resultUrl:     location.origin + "/api/result",
+        payCls:        "demo"
+      });
+    });
+  </script>
+</body>
+</html>
