@@ -1,6 +1,5 @@
 // functions/index.js
 const functions = require("firebase-functions");
-const fetch     = require("node-fetch");
 
 //  OAuth token fetcher
 exports.authenticatePayple = functions.https.onRequest(async (req, res) => {
