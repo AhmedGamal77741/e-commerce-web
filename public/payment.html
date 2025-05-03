@@ -6,84 +6,105 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Subscription Payment</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      padding: 40px;
-      text-align: center;
+    /* Full‑page setup */
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
       background: #f9f9f9;
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
     }
     #resultMsg p {
       margin: 0.5em 0;
+    }
+    /* Ensure any injected iframe fills the screen */
+    iframe {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      border: none;
     }
   </style>
 </head>
 <body>
 
-<h2>Processing Your Subscription…</h2>
-<div id="resultMsg"></div>
+  <h2>Processing Your Subscription…</h2>
+  <div id="resultMsg"></div>
 
-<!-- 1) Load jQuery BEFORE the Payple script -->
-<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
-<!-- 2) Payple’s GPay widget -->
-<script src="https://demo-gpay.payple.kr/common/js/gpay-1.0.1.js"></script>
+  <script>
+    // 1) Load jQuery
+    const jq = document.createElement('script');
+    jq.src = "https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js";
+    jq.onload = loadPayple;
+    document.head.appendChild(jq);
 
-<script>
-  // Utility to show feedback
-  function showMessage(msg, isError = false) {
-    const color = isError ? 'red' : 'green';
-    document.getElementById('resultMsg').innerHTML =
-            `<p style="color:${color}">${msg}</p>`;
-  }
-
-  async function initPayment() {
-    showMessage('Initializing payment...', false);
-
-    try {
-      // parse ?amount=…&orderId=…
-      const params  = new URLSearchParams(location.search);
-      const amount  = params.get('amount');
-      const orderId = params.get('orderId');
-
-      if (!amount || !orderId) {
-        throw new Error('Missing “amount” or “orderId” in URL');
-      }
-
-      // fetch the OAuth token from your Function
-      const authRes = await fetch('/api/authenticate');
-      if (!authRes.ok) {
-        const text = await authRes.text();
-        throw new Error(`Auth failed (${authRes.status}): ${text}`);
-      }
-      const { accessToken } = await authRes.json();
-      if (!accessToken) {
-        throw new Error('No accessToken returned from authenticate API');
-      }
-
-      showMessage('Opening payment window…', false);
-
-      // build Payple widget config
-      const cfg = {
-        Authorization: accessToken,
-        service_id:    'demo',
-        comments:      'Monthly Subscription',
-        totalAmount:   amount,
-        currency:      'USD',
-        resultUrl:     location.origin + '/api/callback',
-        payCls:        'demo',
-        PCD_PAY_OID:   orderId
-      };
-
-      // launch the widget
-      paypleGpayPaymentRequest(cfg);
-
-    } catch (err) {
-      console.error(err);
-      showMessage(err.message, true);
+    // 2) Load Payple widget
+    function loadPayple() {
+      const pp = document.createElement('script');
+      pp.src = "https://demo-gpay.payple.kr/common/js/gpay-1.0.1.js";
+      pp.onload = initPayment;   // ← only run init after widget loads
+      document.head.appendChild(pp);
     }
-  }
 
-  // start it up
-  window.addEventListener('load', initPayment);
-</script>
+    // Utility to show feedback
+    function showMessage(msg, isError = false) {
+      const color = isError ? 'red' : 'green';
+      document.getElementById('resultMsg')
+        .innerHTML = `<p style="color:${color}">${msg}</p>`;
+    }
+
+    // Main flow
+    async function initPayment() {
+      showMessage('Initializing payment...', false);
+
+      try {
+        // 1️⃣ Get URL params
+        const params  = new URLSearchParams(location.search);
+        const amount  = params.get('amount');
+        const orderId = params.get('orderId');
+        if (!amount || !orderId) {
+          throw new Error('Missing “amount” or “orderId” in URL');
+        }
+
+        // 2️⃣ Fetch OAuth token
+        const authRes = await fetch('/api/authenticate');
+        if (!authRes.ok) {
+          const text = await authRes.text();
+          throw new Error(`Auth failed (${authRes.status}): ${text}`);
+        }
+        const { accessToken } = await authRes.json();
+        if (!accessToken) {
+          throw new Error('No accessToken returned from authenticate API');
+        }
+
+        showMessage('Opening payment window…', false);
+
+        // 3️⃣ Build widget config (no popup, full‑page iframe)
+        const cfg = {
+          Authorization: accessToken,
+          service_id:    'demo',
+          comments:      'Monthly Subscription',
+          totalAmount:   amount,
+          currency:      'USD',
+          resultUrl:     location.origin + '/api/callback',
+          payCls:        'demo',
+          PCD_PAY_OID:   orderId,
+          popup:         false   // ← render inline iframe full‑screen
+        };
+
+        // 4️⃣ Launch the widget
+        paypleGpayPaymentRequest(cfg);
+
+      } catch (err) {
+        console.error(err);
+        showMessage(err.message, true);
+      }
+    }
+  </script>
 </body>
 </html>
