@@ -17,21 +17,18 @@
     }
   ],
   "hosting": {
-    "public": "public",
+    "public": "public", 
     "ignore": [
       "firebase.json",
       "**/.*",
       "**/node_modules/**"
     ],
     "rewrites": [
+      
       { "source": "/api/authenticate", "function": "authenticatePayple" },
-      { "source": "/api/callback",     "function": "paymentCallback" },
-      { "source": "**",                "destination": "/payment.html" }
+      { "source": "/api/callback",     "function": "paymentCallback" }
+      
     ]
-
-
-
-
   },
   "database": {
     "rules": "database.rules.json"
