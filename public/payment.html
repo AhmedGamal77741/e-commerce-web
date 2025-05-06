@@ -11,181 +11,105 @@
       margin: 0;
       padding: 0;
       height: 100%;
-      overflow: hidden; /* Prevent scrollbars on the main page */
+      overflow: hidden;
       background: #f9f9f9;
       font-family: Arial, sans-serif;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      text-align: center; /* Center text */
+      text-align: center;
     }
     #resultMsg p {
       margin: 0.5em 0;
-      word-wrap: break-word; /* Wrap long messages */
-      padding: 0 10px; /* Add padding */
+      word-wrap: break-word;
+      padding: 0 10px;
     }
-    /* Ensure any injected iframe fills the screen */
     iframe {
       position: absolute;
       top: 0; left: 0;
       width: 100%; height: 100%;
       border: none;
-      /* Make iframe visible during debugging if needed */
-      /* background-color: rgba(0, 255, 0, 0.1); */
-      /* border: 1px solid red; */
     }
   </style>
 </head>
 <body>
-
   <h2>Processing Your Subscription…</h2>
   <div id="resultMsg"></div>
 
   <script>
-    // Utility function to show messages on the page
     function showMessage(msg, isError = false) {
-      console.log(`showMessage (isError: ${isError}): ${msg}`); // Log messages to console too
+      console.log(`showMessage (isError: ${isError}): ${msg}`);
       const color = isError ? 'red' : 'green';
       const resultDiv = document.getElementById('resultMsg');
       if (resultDiv) {
-          resultDiv.innerHTML = `<p style="color:${color}">${msg}</p>`;
-      } else {
-          console.error("resultMsg element not found!");
+        resultDiv.innerHTML = `<p style="color:${color}">${msg}</p>`;
       }
     }
 
-    // --- Payment Initialization Flow ---
-
-    // 1) Load jQuery (Required by Payple's script)
     function loadJQuery() {
-        console.log("Loading jQuery...");
-        const jq = document.createElement('script');
-        jq.src = "https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js";
-        jq.onload = () => {
-            console.log("jQuery loaded successfully.");
-            loadPaypleScript(); // Proceed only after jQuery loads
-        };
-        jq.onerror = () => {
-            console.error("Failed to load jQuery!");
-            showMessage("Error loading required payment library (jQuery).", true);
-        };
-        document.head.appendChild(jq);
+      const jq = document.createElement('script');
+      jq.src = "https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js";
+      jq.onload = loadPaypleScript;
+      jq.onerror = () => showMessage('Error loading jQuery.', true);
+      document.head.appendChild(jq);
     }
 
-    // 2) Load Payple's gpay script (Only after jQuery is loaded)
     function loadPaypleScript() {
-        console.log("Loading Payple gpay script...");
-        const pp = document.createElement('script');
-        // Use the correct Payple script URL (Ensure it's demo or prod as needed)
-        pp.src = "https://demo-gpay.payple.kr/common/js/gpay-1.0.1.js";
-        pp.onload = () => {
-            console.log("Payple gpay script loaded successfully.");
-            initPayment(); // Proceed to initialize payment logic
-        };
-        pp.onerror = () => {
-            console.error("Failed to load Payple gpay script!");
-            showMessage("Error loading required payment library (Payple).", true);
-        };
-        document.head.appendChild(pp);
+      const pp = document.createElement('script');
+      pp.src = "https://demo-gpay.payple.kr/common/js/gpay-1.0.1.js";
+      pp.onload = initPayment;
+      pp.onerror = () => showMessage('Error loading Payple script.', true);
+      document.head.appendChild(pp);
     }
 
-    // 3) Main payment logic (Only after Payple script is loaded)
     async function initPayment() {
       showMessage('Initializing payment...', false);
-      console.log("Starting initPayment function...");
-
       try {
-        // 3a) Get URL parameters passed from Flutter
-        console.log("Parsing URL parameters...");
-        const params  = new URLSearchParams(location.search);
-        const amount  = params.get('amount');
+        const params = new URLSearchParams(location.search);
+        const amount = params.get('amount');
         const orderId = params.get('orderId');
-        console.log(`Amount: ${amount}, OrderID: ${orderId}`);
-
-        if (!amount || !orderId) {
-          throw new Error('Missing critical payment details (amount or orderId) in URL.');
+        const userId = params.get('userId');
+        if (!amount || !orderId || !userId) {
+          throw new Error('Missing amount, orderId, or userId in URL.');
         }
 
-        // 3b) Fetch OAuth token from our Firebase Function
         showMessage('Authenticating...', false);
-        console.log("Fetching OAuth token from /api/authenticate...");
-        const authRes = await fetch('/api/authenticate');
-        console.log(`Auth response status: ${authRes.status}`);
-
-        if (!authRes.ok) {
-          const errorText = await authRes.text();
-          console.error(`Auth API Error Response Text: ${errorText}`);
-          throw new Error(`Authentication failed (Status: ${authRes.status}). Check function logs.`);
-        }
-
+        const authRes = await fetch('/api/getPaypleAuthToken');
+        if (!authRes.ok) throw new Error('Failed to fetch auth token');
         const authData = await authRes.json();
-        const accessToken = authData.accessToken;
-        // console.log("Received authData:", authData); // Log raw auth data if needed
-
-        if (!accessToken) {
-          console.error("No accessToken received from auth API:", authData);
-          throw new Error('Authentication successful, but no access token was provided.');
-        }
-        console.log("Access token received successfully."); // Don't log the token itself
+        const token = authData.PCD_AUTH_KEY;
+        if (!token) throw new Error('No auth key returned');
 
         showMessage('Preparing payment window…', false);
-
-        // 3c) Build the configuration object for Payple's widget
-        console.log("Building Payple config (cfg)...");
         const cfg = {
-          // Essential fields from Payple docs
-          Authorization: accessToken,     // The token fetched above
-          service_id:    'demo',          // Use 'demo' or your production ID
-          payCls:        'demo',          // Use 'demo' or your production code
-          PCD_PAY_OID:   orderId,         // Your unique order identifier
-          totalAmount:   amount,          // The amount from URL params
-          currency:      'USD',           // Or other supported currency
-          resultUrl:     location.origin + '/api/callback', // Your backend callback URL
-          // Optional / Styling fields
-          comments:      'Subscription Purchase', // Description shown to user
-          popup:         false,          // IMPORTANT: Render inline iframe, not a new window
-          // Add any other required/optional fields from Payple's documentation
-          // e.g., userName, userEmail if needed by Payple
+          Authorization: token,
+          service_id: 'demo',
+          payCls: 'demo',
+          PCD_PAY_OID: orderId,
+          totalAmount: amount,
+          currency: 'KRW',
+          resultUrl: `${location.origin}/api/callback?userId=${encodeURIComponent(userId)}`,
+          PCD_REGULER_FLAG: 'Y',
+          PCD_CARD_VER: '01',
+          PCD_AUTH_TYPE: 'CERT',
+          PCD_SIMPLE_FLAG: 'Y',
+          PCD_PAY_GOODS: 'Monthly Subscription'
         };
 
-        // *** ADDED LOGGING: Log the config object before passing it ***
-        console.log("Payple Config (cfg) being passed:", JSON.stringify(cfg, null, 2));
-        // Be careful not to log sensitive data in production logs if cfg contains it
-
-        // 3d) Launch the Payple widget
-        console.log("Attempting to launch Payple widget (paypleGpayPaymentRequest)...");
         if (typeof paypleGpayPaymentRequest === 'function') {
-            try {
-                paypleGpayPaymentRequest(cfg);
-                // If the above call succeeds immediately, it usually means it has started
-                // the process of creating the iframe and loading the payment UI.
-                console.log("paypleGpayPaymentRequest function called successfully.");
-                // Clear the message area or update it, as the iframe should take over
-                showMessage('Loading payment interface...', false);
-                // Hide the initial message elements if the iframe loads successfully
-                // document.querySelector('h2').style.display = 'none';
-                // document.getElementById('resultMsg').style.display = 'none';
-            } catch (widgetError) {
-                // Catch errors specifically from calling the Payple function
-                console.error("Error calling paypleGpayPaymentRequest:", widgetError);
-                showMessage(`Error launching Payple Widget: ${widgetError.message}`, true);
-            }
+          paypleGpayPaymentRequest(cfg);
+          showMessage('Loading payment interface...', false);
         } else {
-             console.error("paypleGpayPaymentRequest function is not defined! Check if Payple script loaded correctly.");
-             showMessage("Payment function not available. Please reload.", true);
+          showMessage('Payment function not available.', true);
         }
-
       } catch (err) {
-        // Catch general errors from async operations (fetch, param parsing)
-        console.error("Error during payment initialization:", err);
-        showMessage(`Initialization Error: ${err.message}`, true);
+        console.error(err);
+        showMessage(`Error: ${err.message}`, true);
       }
     }
 
-    // Start the process by loading jQuery
     document.addEventListener('DOMContentLoaded', loadJQuery);
-
   </script>
 </body>
 </html>

@@ -23,12 +23,27 @@
       "**/.*",
       "**/node_modules/**"
     ],
-    "rewrites": [
-      
-      { "source": "/api/authenticate", "function": "authenticatePayple" },
-      { "source": "/api/callback",     "function": "paymentCallback" }
-      
-    ]
+   "rewrites": [
+   
+    {
+      "source": "/api/getPaypleAuthToken",
+      "function": "getPaypleAuthToken"
+    },
+
+    
+    {
+      "source": "/api/callback",
+      "function": "handleBillingCallback"
+    },
+
+    
+    {
+      "source": "/api/renew",
+      "function": "renewMonthlySubscriptions"
+    }
+
+    
+  ]
   },
   "database": {
     "rules": "database.rules.json"
