@@ -40,16 +40,27 @@ async function partnerAuth(workType = 'AUTH') {
 /**
  * 1) Get Payple Auth Token (callable)
  */
-exports.getPaypleAuthToken = functions.https.onCall(async (data, context) => {
-  const auth = await partnerAuth();
-  if (auth.result !== 'SUCCESS') {
-    throw new functions.https.HttpsError('internal', 'Auth failed', auth);
-  }
-  return {
-    PCD_CST_ID: auth.PCD_CST_ID,
-    PCD_CUST_KEY: auth.PCD_CUST_KEY,
-    PCD_AUTH_KEY: auth.PCD_AUTH_KEY
-  };
+const cors = require('cors')({ origin: true });
+
+exports.getPaypleAuthToken = functions.https.onRequest(async (req, res) => {
+  // allow CORS so your browser page can call it
+  cors(req, res, async () => {
+    try {
+      const auth = await partnerAuth();
+      if (auth.result !== 'SUCCESS') {
+        return res.status(500).json({ error: 'Auth failed', details: auth });
+      }
+      // only send what you need
+      res.json({
+        PCD_CST_ID: auth.PCD_CST_ID,
+        PCD_CUST_KEY: auth.PCD_CUST_KEY,
+        PCD_AUTH_KEY: auth.PCD_AUTH_KEY
+      });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: e.message });
+    }
+  });
 });
 
 /**
