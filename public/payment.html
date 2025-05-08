@@ -6,109 +6,79 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Subscription Payment</title>
   <style>
-    /* Full‑page setup */
-    html, body {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      overflow: hidden;
-      background: #f9f9f9;
-      font-family: Arial, sans-serif;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      text-align: center;
-    }
-    #resultMsg p {
-      margin: 0.5em 0;
-      word-wrap: break-word;
-      padding: 0 10px;
-    }
-    iframe {
-      position: absolute;
-      top: 0; left: 0;
-      width: 100%; height: 100%;
-      border: none;
-    }
+    html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#f9f9f9; font-family:Arial, sans-serif; display:flex; align-items:center; justify-content:center; flex-direction:column; text-align:center; }
+    #resultMsg p { margin:0.5em 0; word-wrap:break-word; padding:0 10px; }
+    iframe { position:absolute; top:0; left:0; width:100%; height:100%; border:none; }
   </style>
 </head>
 <body>
   <h2>Processing Your Subscription…</h2>
   <div id="resultMsg"></div>
-
   <script>
-    function showMessage(msg, isError = false) {
+    function showMessage(msg, isError=false) {
       console.log(`showMessage (isError: ${isError}): ${msg}`);
       const color = isError ? 'red' : 'green';
-      const resultDiv = document.getElementById('resultMsg');
-      if (resultDiv) {
-        resultDiv.innerHTML = `<p style="color:${color}">${msg}</p>`;
-      }
+      document.getElementById('resultMsg').innerHTML = `<p style="color:${color}">${msg}</p>`;
     }
 
     function loadJQuery() {
-      const jq = document.createElement('script');
-      jq.src = "https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js";
-      jq.onload = loadPaypleScript;
-      jq.onerror = () => showMessage('Error loading jQuery.', true);
-      document.head.appendChild(jq);
+      const s = document.createElement('script'); s.src = 'https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js';
+      s.onload = loadPaypleScript; s.onerror = ()=>showMessage('Error loading jQuery.', true);
+      document.head.appendChild(s);
     }
 
     function loadPaypleScript() {
-      const pp = document.createElement('script');
-      pp.src = "https://demo-gpay.payple.kr/common/js/gpay-1.0.1.js";
-      pp.onload = initPayment;
-      pp.onerror = () => showMessage('Error loading Payple script.', true);
-      document.head.appendChild(pp);
+      const s = document.createElement('script'); s.src = 'https://democpay.payple.kr/js/v1/payment.js';
+      s.onload = initPayment; s.onerror = ()=>showMessage('Error loading Payple script.', true);
+      document.head.appendChild(s);
     }
 
     async function initPayment() {
-      showMessage('Initializing payment...', false);
+      showMessage('Initializing payment...');
       try {
         const params = new URLSearchParams(location.search);
         const amount = params.get('amount');
-        const orderId = params.get('orderId');
         const userId = params.get('userId');
-        if (!amount || !orderId || !userId) {
-          throw new Error('Missing amount, orderId, or userId in URL.');
-        }
+        if (!amount||!userId) throw new Error('Missing amount or userId');
 
-        showMessage('Authenticating...', false);
-        const authRes = await fetch('/api/getPaypleAuthToken');
-        if (!authRes.ok) throw new Error('Failed to fetch auth token');
-        const authData = await authRes.json();
-        const token = authData.PCD_AUTH_KEY;
-        if (!token) throw new Error('No auth key returned');
+        // showMessage('Fetching auth token...');
+        // const resp = await fetch(`${location.origin}/api/getPaypleAuthToken`, {
+        //   method: 'GET', credentials: 'same-origin'
+        // });
+        // if (!resp.ok) {
+        //   const txt = await resp.text();
+        //   throw new Error(`Auth endpoint error: ${resp.status} ${txt}`);
+        // }
+        // const data = await resp.json();
+        // const token = data.PCD_AUTH_KEY;
+        // if (!token) throw new Error('No auth key in response');
 
-        showMessage('Preparing payment window…', false);
-        const cfg = {
-          Authorization: token,
-          service_id: 'demo',
-          payCls: 'demo',
-          PCD_PAY_OID: orderId,
-          totalAmount: amount,
-          currency: 'KRW',
-          resultUrl: `${location.origin}/api/callback?userId=${encodeURIComponent(userId)}`,
-          PCD_REGULER_FLAG: 'Y',
-          PCD_CARD_VER: '01',
-          PCD_AUTH_TYPE: 'CERT',
-          PCD_SIMPLE_FLAG: 'Y',
-          PCD_PAY_GOODS: 'Monthly Subscription'
-        };
-
-        if (typeof paypleGpayPaymentRequest === 'function') {
-          paypleGpayPaymentRequest(cfg);
-          showMessage('Loading payment interface...', false);
-        } else {
-          showMessage('Payment function not available.', true);
-        }
-      } catch (err) {
-        console.error(err);
-        showMessage(`Error: ${err.message}`, true);
+        showMessage('Launching payment widget...');
+        let obj = {};
+            obj.clientKey = "test_DF55F29DA654A8CBC0F0A9DD4B556486";
+            obj.PCD_PAY_TYPE = "card";
+            obj.PCD_PAY_WORK = "CERT"
+            obj.PCD_CARD_VER = "01";
+            obj.PCD_PAY_GOODS = "monthly subscription";
+            obj.PCD_PAY_TOTAL = amount;
+            obj.PCD_RST_URL = `https://handlebillingcallback-nlc5xkd7oa-uc.a.run.app?userId=${encodeURIComponent(userId)}`
+            // `${location.origin}/api/callback?userId=${encodeURIComponent(userId)}`;
+        // const cfg = {
+        //   Authorization: token,
+        //   service_id: 'demo', payCls:'demo',
+        //   PCD_PAY_OID: orderId, totalAmount: amount,
+        //   currency: 'KRW',
+        //   resultUrl: `${location.origin}/api/callback?userId=${encodeURIComponent(userId)}`,
+        //   PCD_REGULER_FLAG:'Y', PCD_CARD_VER:'01', PCD_AUTH_TYPE:'CERT', PCD_SIMPLE_FLAG:'Y',
+        //   // PCD_PAY_GOODS:'테스트 상품'
+        // };
+        if (typeof  PaypleCpayAuthCheck==='function') PaypleCpayAuthCheck(obj);
+        else throw new Error('paypleGpayPaymentRequest not available');
+      } catch(e) {
+        console.error(e);
+        showMessage(`Error: ${e.message}`, true);
       }
     }
-
     document.addEventListener('DOMContentLoaded', loadJQuery);
   </script>
 </body>

@@ -1,16 +1,17 @@
 // index.js
 // Firebase Cloud Functions for Payple 정기결제 (recurring billing)
-// Install dependencies: firebase-admin, firebase-functions, node-fetch
+// Install dependencies: firebase-admin, firebase-functions, node-fetch, cors
 
 const admin = require('firebase-admin');
 const functions = require('firebase-functions');
-const fetch = require('node-fetch');
+const fetch = require('node-fetch').default;
+const cors = require('cors')({ origin: true });
 
 admin.initializeApp();
 const db = admin.firestore();
 
-// Environment variables (set via `firebase functions:config:set payple.cst_id=... payple.cust_key=... payple.referer=...`)
-const PAYPLE_CST_ID  = "test";
+// Temporary hardcoded test credentials (for testing only)
+const PAYPLE_CST_ID   = "test";
 const PAYPLE_CUST_KEY = "abcd1234567890";
 const PAYPLE_REFERER  = "https://your-domain.com";
 const API_BASE = 'https://democpay.payple.kr/php';
@@ -22,9 +23,9 @@ async function partnerAuth(workType = 'AUTH') {
   const body = {
     cst_id: PAYPLE_CST_ID,
     custKey: PAYPLE_CUST_KEY,
-    PCD_PAY_TYPE: 'card',
-    ...(workType === 'PUSERDEL' && { PCD_PAY_WORK: 'PUSERDEL' })
+    PCD_PAY_TYPE: 'card'
   };
+  if (workType === 'PUSERDEL') body.PCD_PAY_WORK = 'PUSERDEL';
 
   const res = await fetch(`${API_BASE}/auth.php`, {
     method: 'POST',
@@ -38,26 +39,24 @@ async function partnerAuth(workType = 'AUTH') {
 }
 
 /**
- * 1) Get Payple Auth Token (callable)
+ * 1) Get Payple Auth Token (HTTP)
  */
-const cors = require('cors')({ origin: true });
-
-exports.getPaypleAuthToken = functions.https.onRequest(async (req, res) => {
-  // allow CORS so your browser page can call it
+exports.getPaypleAuthToken = functions.https.onRequest((req, res) => {
   cors(req, res, async () => {
     try {
       const auth = await partnerAuth();
-      if (auth.result !== 'SUCCESS') {
+      // Payple returns result: 'success' or similar
+      if (!auth.result || auth.result.toLowerCase() !== 'success') {
         return res.status(500).json({ error: 'Auth failed', details: auth });
       }
-      // only send what you need
+      // Map Payple's fields: JSON has cst_id, custKey, AuthKey
       res.json({
-        PCD_CST_ID: auth.PCD_CST_ID,
-        PCD_CUST_KEY: auth.PCD_CUST_KEY,
-        PCD_AUTH_KEY: auth.PCD_AUTH_KEY
+        PCD_CST_ID: auth.cst_id,
+        PCD_CUST_KEY: auth.custKey,
+        PCD_AUTH_KEY: auth.AuthKey
       });
     } catch (e) {
-      console.error(e);
+      console.error('Error in getPaypleAuthToken:', e);
       res.status(500).json({ error: e.message });
     }
   });
@@ -66,40 +65,57 @@ exports.getPaypleAuthToken = functions.https.onRequest(async (req, res) => {
 /**
  * 2) Callback from Payple after billing key registration & first payment
  */
+// 2) Callback from Payple after billing key registration & first payment
 exports.handleBillingCallback = functions.https.onRequest(async (req, res) => {
   const p = { ...req.query, ...req.body };
   const userId = p.userId;
-  if (!userId) return res.status(400).send('Missing userId');
-
-  if (p.PCD_PAY_RESULT !== 'success') {
-    const errMsg = encodeURIComponent(p.PCD_PAY_MSG || 'Payment failed');
-    return res.status(200).send(
-      `<script>window.location.href="paymentresult://callback?status=fail&error=${errMsg}";</script>`
-    );
+  if (!userId) {
+    return res.status(400).json({ error: 'Missing userId' });
   }
 
+  // Prepare response payload
+  let reply = {};
+
+  // Check payment result
+  if (p.PCD_PAY_RST !== 'success') {
+    reply.PCD_PAY_STATE = '01';
+    reply.PCD_PAY_MSG   = p.PCD_PAY_MSG || 'Payment failed';
+    return res
+      .status(200)
+      .set('Content-Type', 'application/json')
+      .send(reply);
+  }
+
+  // On success, record in Firestore
   const billingKey = p.PCD_PAYER_ID;
-  const paidAmount = Number(p.PCD_PAY_TOTAL || 0);
   const nextBilling = admin.firestore.Timestamp.fromDate(
     new Date(new Date().setMonth(new Date().getMonth() + 1))
   );
+  const orderId=  p.PCD_PAY_OID;
 
   await db.collection('subscriptions').doc(userId).set({
-    billingKey,
+    billingKey: billingKey,
     status: 'active',
-    planPrice: paidAmount,
     planInterval: 'month',
     lastPaymentDate: admin.firestore.Timestamp.now(),
-    nextBillingDate: nextBilling
+    nextBillingDate: nextBilling,
+    orderId: orderId,
   }, { merge: true });
 
-  const qs = `status=success&amount=${paidAmount}&nextBillingDate=${encodeURIComponent(nextBilling.toDate().toISOString())}`;
-  res.status(200).set('Content-Type', 'text/html')
-     .send(`<script>window.location.href="paymentresult://callback?${qs}";</script>`);
+  // Build JSON reply for widget
+  reply.PCD_PAY_STATE   = '00';
+  reply.PCD_PAY_MSG     = 'Success';
+  reply.PCD_PAYER_ID    = billingKey;
+  reply.PCD_NEXT_BILL   = nextBilling.toDate().toISOString();
+
+  return res
+    .status(200)
+    .set('Content-Type', 'application/json')
+    .send(reply);
 });
 
 /**
- * 3) Trigger First Payment (callable) - optional if using CERT
+ * 3) Trigger First Payment (callable)
  */
 exports.triggerFirstPayment = functions.https.onCall(async (data, context) => {
   const uid = context.auth?.uid;
@@ -111,15 +127,17 @@ exports.triggerFirstPayment = functions.https.onCall(async (data, context) => {
   if (!sub?.billingKey) throw new functions.https.HttpsError('failed-precondition', 'No billing key');
 
   const authData = await partnerAuth();
-  if (authData.result !== 'SUCCESS') throw new functions.https.HttpsError('internal', 'Auth failed');
+  if (!authData.result || authData.result.toLowerCase() !== 'success') {
+    throw new functions.https.HttpsError('internal', 'Auth failed', authData);
+  }
 
   const payRes = await fetch(`${API_BASE}/SimplePayCardAct.php?ACT_=PAYM`, {
     method: 'POST',
-    headers: {'Content-Type': 'application/json','Referer': PAYPLE_REFERER},
+    headers: { 'Content-Type': 'application/json', 'Referer': PAYPLE_REFERER },
     body: JSON.stringify({
-      PCD_CST_ID: authData.PCD_CST_ID,
-      PCD_CUST_KEY: authData.PCD_CUST_KEY,
-      PCD_AUTH_KEY: authData.PCD_AUTH_KEY,
+      PCD_CST_ID: authData.cst_id,
+      PCD_CUST_KEY: authData.custKey,
+      PCD_AUTH_KEY: authData.AuthKey,
       PCD_PAY_TYPE: 'card',
       PCD_PAYER_ID: sub.billingKey,
       PCD_PAY_GOODS: 'Subscription (1 month)',
@@ -128,7 +146,7 @@ exports.triggerFirstPayment = functions.https.onCall(async (data, context) => {
     })
   });
   const payJson = await payRes.json();
-  if (payJson.result !== 'success') {
+  if (!payJson.result || payJson.result.toLowerCase() !== 'success') {
     throw new functions.https.HttpsError('internal', 'Payment failed', payJson);
   }
 
@@ -140,7 +158,7 @@ exports.triggerFirstPayment = functions.https.onCall(async (data, context) => {
 });
 
 /**
- * 4) Renewal Endpoint (HTTP) - call this from Cloud Scheduler
+ * 4) Renewal Endpoint (HTTP)
  */
 exports.renewMonthlySubscriptions = functions.https.onRequest(async (req, res) => {
   const now = admin.firestore.Timestamp.now();
@@ -153,14 +171,15 @@ exports.renewMonthlySubscriptions = functions.https.onRequest(async (req, res) =
   for (const doc of snap.docs) {
     const { billingKey, planPrice } = doc.data();
     const authData = await partnerAuth();
-    if (authData.result !== 'SUCCESS') continue;
+    if (!authData.result || authData.result.toLowerCase() !== 'success') continue;
 
     const payRes = await fetch(`${API_BASE}/SimplePayCardAct.php?ACT_=PAYM`, {
-      method: 'POST',headers: {'Content-Type': 'application/json','Referer': PAYPLE_REFERER},
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Referer': PAYPLE_REFERER },
       body: JSON.stringify({
-        PCD_CST_ID: authData.PCD_CST_ID,
-        PCD_CUST_KEY: authData.PCD_CUST_KEY,
-        PCD_AUTH_KEY: authData.PCD_AUTH_KEY,
+        PCD_CST_ID: authData.cst_id,
+        PCD_CUST_KEY: authData.custKey,
+        PCD_AUTH_KEY: authData.AuthKey,
         PCD_PAY_TYPE: 'card',
         PCD_PAYER_ID: billingKey,
         PCD_PAY_GOODS: 'Subscription (1 month)',
@@ -169,8 +188,10 @@ exports.renewMonthlySubscriptions = functions.https.onRequest(async (req, res) =
       })
     });
     const payJson = await payRes.json();
-    if (payJson.result === 'success') {
-      const next = admin.firestore.Timestamp.fromDate(new Date(new Date().setMonth(new Date().getMonth() + 1)));
+    if (payJson.result && payJson.result.toLowerCase() === 'success') {
+      const next = admin.firestore.Timestamp.fromDate(
+        new Date(new Date().setMonth(new Date().getMonth() + 1))
+      );
       await doc.ref.update({ nextBillingDate: next });
       results.push({ id: doc.id, status: 'renewed' });
     } else {
@@ -178,7 +199,7 @@ exports.renewMonthlySubscriptions = functions.https.onRequest(async (req, res) =
       results.push({ id: doc.id, status: 'failed' });
     }
   }
-  res.send({ processed: results.length, details: results });
+  res.json({ processed: results.length, details: results });
 });
 
 /**
@@ -194,19 +215,22 @@ exports.cancelSubscription = functions.https.onCall(async (data, context) => {
   if (sub?.status !== 'active') throw new functions.https.HttpsError('failed-precondition', 'No active subscription');
 
   const authData = await partnerAuth('PUSERDEL');
-  if (authData.result !== 'SUCCESS') throw new functions.https.HttpsError('internal', 'Cancel auth failed');
+  if (!authData.result || authData.result.toLowerCase() !== 'success') {
+    throw new functions.https.HttpsError('internal', 'Cancel auth failed', authData);
+  }
 
   const cancelRes = await fetch(`${API_BASE}/cPayUser/api/cPayUserAct.php?ACT_=PUSERDEL`, {
-    method: 'POST', headers: {'Content-Type': 'application/json','Referer': PAYPLE_REFERER},
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Referer': PAYPLE_REFERER },
     body: JSON.stringify({
-      PCD_CST_ID: authData.PCD_CST_ID,
-      PCD_CUST_KEY: authData.PCD_CUST_KEY,
-      PCD_AUTH_KEY: authData.PCD_AUTH_KEY,
+      PCD_CST_ID: authData.cst_id,
+      PCD_CUST_KEY: authData.custKey,
+      PCD_AUTH_KEY: authData.AuthKey,
       PCD_PAYER_ID: sub.billingKey
     })
   });
   const cancelJson = await cancelRes.json();
-  if (cancelJson.result !== 'success') {
+  if (!cancelJson.result || cancelJson.result.toLowerCase() !== 'success') {
     throw new functions.https.HttpsError('internal', 'Cancel failed', cancelJson);
   }
 
