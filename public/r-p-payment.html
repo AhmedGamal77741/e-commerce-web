@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="referrer" content="origin" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Subscription Payment</title>
+  <style>
+    html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#f9f9f9;
+      font-family:Arial,sans-serif; display:flex; align-items:center; justify-content:center;
+      flex-direction:column; text-align:center;}
+    #resultMsg p { margin:0.5em 0; word-wrap:break-word; padding:0 10px; }
+  </style>
+</head>
+<body>
+  <h2>Processing Your Subscription…</h2>
+  <div id="resultMsg"></div>
+
+  <script>
+    function showMessage(msg, isError=false) {
+      const color = isError ? 'red' : 'green';
+      document.getElementById('resultMsg')
+        .innerHTML = `<p style="color:${color}">${msg}</p>`;
+    }
+
+    // 1️⃣ Load jQuery (required by Payple’s script)
+    const jq = document.createElement('script');
+    jq.src = 'https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js';
+    jq.onload = loadPaypleScript;
+    jq.onerror = () => showMessage('Error loading jQuery.', true);
+    document.head.appendChild(jq);
+
+    // 2️⃣ Load Payple’s payment.js
+    function loadPaypleScript() {
+      const pp = document.createElement('script');
+      pp.src = 'https://democpay.payple.kr/js/v1/payment.js';
+      pp.onload = initPayment;
+      pp.onerror = () => showMessage('Error loading Payple script.', true);
+      document.head.appendChild(pp);
+    }
+
+    // 3️⃣ Initialize the widget
+    function initPayment() {
+      showMessage('Launching payment widget...', false);
+
+      const params = new URLSearchParams(location.search);
+      const amount = params.get('amount');
+      const userId = params.get('userId');
+      const phoneNO = params.get('phoneNo');
+      const payerId = params.get('payerId');
+      const paymentId = params.get('paymentId');
+      if (!amount || !userId) {
+        return showMessage('Missing amount or userId or phoneNo or payerId', true);
+      }
+
+      const obj = {
+        clientKey:    'test_DF55F29DA654A8CBC0F0A9DD4B556486',
+        PCD_PAY_TYPE: 'card',
+        PCD_PAY_WORK: 'CERT',
+        PCD_CARD_VER: '01',
+        PCD_SIMPLE_FLAG : "Y",
+		PCD_PAYER_AUTHTYPE : "pwd",
+        PCD_PAY_GOODS:'order',
+        PCD_PAY_TOTAL: amount,
+        PCD_RST_URL:   `${location.origin}/api/p-callback?userId=${encodeURIComponent(userId)}&paymentId=${encodeURIComponent(paymentId)}`,
+        PCD_PAYER_ID : payerId,
+        PCD_PAYER_HP :phoneNO,
+        PCD_PAY_OID	:paymentId
+  
+      };
+
+      if (typeof PaypleCpayAuthCheck === 'function') {
+        PaypleCpayAuthCheck(obj);
+      } else {
+        showMessage('Payment widget not available.', true);
+      }
+    }
+  </script>
+</body>
+</html>

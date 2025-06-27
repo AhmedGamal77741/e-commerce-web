@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="referrer" content="origin" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Payment Result</title>
+  <style>
+    html, body { 
+      margin: 0; 
+      padding: 0; 
+      height: 100%; 
+      background: #ffffff;
+      font-family: Arial, sans-serif; 
+      display: flex; 
+      align-items: center; 
+      justify-content: center;
+      text-align: center;
+    }
+    .message {
+      padding: 20px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .message h2 {
+      margin-top: 0;
+    }
+    .loader {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #3498db;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      animation: spin 1s linear infinite;
+      margin: 20px auto 0;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="message">
+    <h2>Finalizing Payment...</h2>
+    <div class="loader"></div>
+    <p id="statusText" style="margin-top: 1em;">Please wait while we redirect you back to the app.</p>
+  </div>
+
+  <script>
+    (function() {
+      // 1. Parse all query parameters
+      function parseQueryString() {
+        const query = window.location.search.substring(1);
+        const vars = query.split("&");
+        const result = {};
+        vars.forEach(function(part) {
+          const [key, val] = part.split("=");
+          if (key) result[decodeURIComponent(key)] = decodeURIComponent(val || "");
+        });
+        return result;
+      }
+
+      const params = parseQueryString();
+      
+      // 2. Extract relevant Payple fields + userId
+      const userId       = params.userId || "";
+      const resultCode   = params.PCD_PAY_RST || "";
+      const resultMsg    = params.PCD_PAY_RSTMSG || "";
+      const transactionId = params.PCD_PAY_TID || "";
+      
+      // 3. Build a deep‐link into your Flutter app.
+      //    (Customize this to your actual URI scheme, e.g. "myapp://payment_result")
+      let flutterDeepLink = "myapp://payment_result?";
+      flutterDeepLink += "userId=" + encodeURIComponent(userId) + "&";
+      flutterDeepLink += "resultCode=" + encodeURIComponent(resultCode) + "&";
+      flutterDeepLink += "resultMsg=" + encodeURIComponent(resultMsg) + "&";
+      flutterDeepLink += "transactionId=" + encodeURIComponent(transactionId);
+
+      // 4. Optionally, show success/failure message for a second,
+      //    then redirect to the Flutter deep link.
+      const isSuccess = (resultCode === "0000");
+      const statusTextElem = document.getElementById("statusText");
+      if (isSuccess) {
+        statusTextElem.innerText = "Payment succeeded. Redirecting to app...";
+      } else {
+        statusTextElem.innerText = 
+          "Payment failed or was canceled.\nRedirecting to app...";
+      }
+
+      // 5. After a brief delay, navigate to the app via deep link
+      setTimeout(function() {
+        window.location.href = flutterDeepLink;
+      }, 1500); // 1.5 seconds so the user sees the status message
+    })();
+  </script>
+</body>
+</html>

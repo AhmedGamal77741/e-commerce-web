@@ -25,7 +25,7 @@
     ],
    "rewrites": [
     
-   
+    { "source": "/api/authenticate", "function": "authenticatePayple" },
     {
       "source": "/api/getPaypleAuthToken",
       "function": "getPaypleAuthToken"
@@ -41,9 +41,17 @@
     {
       "source": "/api/renew",
       "function": "renewMonthlySubscriptions"
-    }
+    },
 
-    
+  
+    {
+      "source": "/api/p-callback",
+      "function": "handlePassCallback"
+    },  
+    {
+      "source": "/api/b-callback",
+      "function": "handleBankPassCallback"
+    }  
   ]
   },
   "database": {

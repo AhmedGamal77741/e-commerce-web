@@ -1,85 +1,100 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="referrer" content="origin" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8">
+  <meta name="referrer" content="origin">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Subscription Payment</title>
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+  <script src="https://democpay.payple.kr/js/v1/payment.js"></script>
   <style>
-    html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#f9f9f9; font-family:Arial, sans-serif; display:flex; align-items:center; justify-content:center; flex-direction:column; text-align:center; }
-    #resultMsg p { margin:0.5em 0; word-wrap:break-word; padding:0 10px; }
-    iframe { position:absolute; top:0; left:0; width:100%; height:100%; border:none; }
+    html, body { 
+      margin: 0; 
+      padding: 0; 
+      height: 100%; 
+      background: #f9f9f9;
+      font-family: Arial, sans-serif; 
+      display: flex; 
+      align-items: center; 
+      justify-content: center;
+      flex-direction: column; 
+      text-align: center;
+    }
+    #resultMsg { 
+      margin: 20px 0; 
+    }
+    #resultMsg p { 
+      margin: 0.5em 0; 
+      word-wrap: break-word; 
+      padding: 0 10px; 
+    }
+    .loader {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #3498db;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 20px auto;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
   </style>
 </head>
 <body>
-  <h2>Processing Your Subscription…</h2>
-  <div id="resultMsg"></div>
+  <h2>Processing Your Subscription...</h2>
+  <div class="loader"></div>
+  <div id="resultMsg">Launching payment widget...</div>
+
   <script>
-    function showMessage(msg, isError=false) {
-      console.log(`showMessage (isError: ${isError}): ${msg}`);
-      const color = isError ? 'red' : 'green';
-      document.getElementById('resultMsg').innerHTML = `<p style="color:${color}">${msg}</p>`;
-    }
-
-    function loadJQuery() {
-      const s = document.createElement('script'); s.src = 'https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js';
-      s.onload = loadPaypleScript; s.onerror = ()=>showMessage('Error loading jQuery.', true);
-      document.head.appendChild(s);
-    }
-
-    function loadPaypleScript() {
-      const s = document.createElement('script'); s.src = 'https://democpay.payple.kr/js/v1/payment.js';
-      s.onload = initPayment; s.onerror = ()=>showMessage('Error loading Payple script.', true);
-      document.head.appendChild(s);
-    }
-
-    async function initPayment() {
-      showMessage('Initializing payment...');
-      try {
-        const params = new URLSearchParams(location.search);
-        const amount = params.get('amount');
-        const userId = params.get('userId');
-        if (!amount||!userId) throw new Error('Missing amount or userId');
-
-        // showMessage('Fetching auth token...');
-        // const resp = await fetch(`${location.origin}/api/getPaypleAuthToken`, {
-        //   method: 'GET', credentials: 'same-origin'
-        // });
-        // if (!resp.ok) {
-        //   const txt = await resp.text();
-        //   throw new Error(`Auth endpoint error: ${resp.status} ${txt}`);
-        // }
-        // const data = await resp.json();
-        // const token = data.PCD_AUTH_KEY;
-        // if (!token) throw new Error('No auth key in response');
-
-        showMessage('Launching payment widget...');
-        let obj = {};
-            obj.clientKey = "test_DF55F29DA654A8CBC0F0A9DD4B556486";
-            obj.PCD_PAY_TYPE = "card";
-            obj.PCD_PAY_WORK = "CERT"
-            obj.PCD_CARD_VER = "01";
-            obj.PCD_PAY_GOODS = "monthly subscription";
-            obj.PCD_PAY_TOTAL = amount;
-            obj.PCD_RST_URL = `https://handlebillingcallback-nlc5xkd7oa-uc.a.run.app?userId=${encodeURIComponent(userId)}`
-            // `${location.origin}/api/callback?userId=${encodeURIComponent(userId)}`;
-        // const cfg = {
-        //   Authorization: token,
-        //   service_id: 'demo', payCls:'demo',
-        //   PCD_PAY_OID: orderId, totalAmount: amount,
-        //   currency: 'KRW',
-        //   resultUrl: `${location.origin}/api/callback?userId=${encodeURIComponent(userId)}`,
-        //   PCD_REGULER_FLAG:'Y', PCD_CARD_VER:'01', PCD_AUTH_TYPE:'CERT', PCD_SIMPLE_FLAG:'Y',
-        //   // PCD_PAY_GOODS:'테스트 상품'
-        // };
-        if (typeof  PaypleCpayAuthCheck==='function') PaypleCpayAuthCheck(obj);
-        else throw new Error('paypleGpayPaymentRequest not available');
-      } catch(e) {
-        console.error(e);
-        showMessage(`Error: ${e.message}`, true);
+    $(document).ready(function() {
+      // 1) Read `amount` and `userId` from query‐string
+      const params = new URLSearchParams(location.search);
+      const amount = params.get('amount');
+      const userId = params.get('userId');
+      
+      if (!amount || !userId) {
+        document.getElementById('resultMsg').innerHTML = 
+          '<p style="color:red">Error: Missing amount or userId parameters</p>';
+        document.querySelector('.loader').style.display = 'none';
+        return;
       }
-    }
-    document.addEventListener('DOMContentLoaded', loadJQuery);
+
+      // 2) Build the Payple payment‐launch object
+      let obj = {};
+      obj.clientKey    = "test_DF55F29DA654A8CBC0F0A9DD4B556486"; 
+      obj.PCD_PAY_TYPE = "transfer";              // or "card" if you want card
+      obj.PCD_PAY_WORK = "CERT";                  
+      obj.PCD_PAY_GOODS = "Monthly Subscription";
+      obj.PCD_PAY_TOTAL = amount;                 // e.g. "1000"
+
+      // 3) Use an absolute URL for PCD_RST_URL (include userId as query if you like)
+      obj.PCD_RST_URL  = 
+        "https://e-commerce-app-34fb2.web.app/result.html?userId=" 
+        + encodeURIComponent(userId);
+
+      // 4) Finally, call Payple’s JS function to open the payment widget
+      function launchPayple() {
+        if (typeof PaypleCpayAuthCheck === 'function') {
+          PaypleCpayAuthCheck(obj);
+        } else {
+          // Retry once more if widget JS hasn’t loaded yet
+          setTimeout(function() {
+            if (typeof PaypleCpayAuthCheck === 'function') {
+              PaypleCpayAuthCheck(obj);
+            } else {
+              document.getElementById('resultMsg').innerHTML = 
+                '<p style="color:red">Error: Payment widget not available</p>';
+              document.querySelector('.loader').style.display = 'none';
+            }
+          }, 500);
+        }
+      }
+
+      launchPayple();
+    });
   </script>
 </body>
 </html>

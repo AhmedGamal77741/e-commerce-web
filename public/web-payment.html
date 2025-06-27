@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="referrer" content="origin" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Subscription Payment</title>
+  <style>
+    html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#f9f9f9; font-family:Arial, sans-serif; display:flex; align-items:center; justify-content:center; flex-direction:column; text-align:center; }
+    #resultMsg p { margin:0.5em 0; word-wrap:break-word; padding:0 10px; }
+    iframe { position:absolute; top:0; left:0; width:100%; height:100%; border:none; }
+  </style>
+</head>
+<body>
+  <h2>Processing Your Subscription…</h2>
+  <div id="resultMsg"></div>
+  <script>
+    function showMessage(msg, isError=false) {
+      console.log(`showMessage (isError: ${isError}): ${msg}`);
+      const color = isError ? 'red' : 'green';
+      document.getElementById('resultMsg').innerHTML = `<p style="color:${color}">${msg}</p>`;
+    }
+
+    function loadJQuery() {
+      const s = document.createElement('script'); s.src = 'https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js';
+      s.onload = loadPaypleScript; s.onerror = ()=>showMessage('Error loading jQuery.', true);
+      document.head.appendChild(s);
+    }
+
+    function loadPaypleScript() {
+      const s = document.createElement('script'); s.src = 'https://democpay.payple.kr/js/v1/payment.js';
+      s.onload = initPayment; s.onerror = ()=>showMessage('Error loading Payple script.', true);
+      document.head.appendChild(s);
+    }
+
+    async function initPayment() {
+      showMessage('Initializing payment...');
+      try {
+        const params = new URLSearchParams(location.search);
+        const amount = params.get('amount');
+        const userId = params.get('userId');
+        if (!amount||!userId) throw new Error('Missing amount or userId');
+
+        // showMessage('Fetching auth token...');
+        // const resp = await fetch(`${location.origin}/api/getPaypleAuthToken`, {
+        //   method: 'GET', credentials: 'same-origin'
+        // });
+        // if (!resp.ok) {
+        //   const txt = await resp.text();
+        //   throw new Error(`Auth endpoint error: ${resp.status} ${txt}`);
+        // }
+        // const data = await resp.json();
+        // const token = data.PCD_AUTH_KEY;
+        // if (!token) throw new Error('No auth key in response');
+
+        showMessage('Launching payment widget...');
+        let obj = {};
+           obj.clientKey = "test_DF55F29DA654A8CBC0F0A9DD4B556486";
+            obj.PCD_PAY_TYPE = "transfer";
+            obj.PCD_PAY_WORK = "CERT"
+            obj.PCD_PAY_GOODS = "monthly subscription";
+            obj.PCD_PAY_TOTAL = amount;
+            obj.PCD_RST_URL = `${location.origin}/api/callback?userId=${encodeURIComponent(userId)}`;
+            // `${location.origin}/api/callback?userId=${encodeURIComponent(userId)}`;
+        // const cfg = {
+        //   Authorization: token,
+        //   service_id: 'demo', payCls:'demo',
+        //   PCD_PAY_OID: orderId, totalAmount: amount,
+        //   currency: 'KRW',
+        //   resultUrl: `${location.origin}/api/callback?userId=${encodeURIComponent(userId)}`,
+        //   PCD_REGULER_FLAG:'Y', PCD_CARD_VER:'01', PCD_AUTH_TYPE:'CERT', PCD_SIMPLE_FLAG:'Y',
+        //   // PCD_PAY_GOODS:'테스트 상품'
+        // };
+        if (typeof  PaypleCpayAuthCheck==='function') PaypleCpayAuthCheck(obj);
+        else throw new Error('paypleGpayPaymentRequest not available');
+      } catch(e) {
+        console.error(e);
+        showMessage(`Error: ${e.message}`, true);
+      }
+    }
+    document.addEventListener('DOMContentLoaded', loadJQuery);
+  </script>
+</body>
+</html>
