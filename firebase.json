@@ -51,6 +51,10 @@
     {
       "source": "/api/b-callback",
       "function": "handleBankPassCallback"
+    },  
+    {
+      "source": "/api/webhook",
+      "function": "paypleTransferWebhook"
     }  
   ]
   },

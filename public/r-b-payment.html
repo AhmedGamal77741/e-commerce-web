@@ -49,6 +49,8 @@
       const phoneNO = params.get('phoneNo');
       const payerId = params.get('payerId');
       const paymentId = params.get('paymentId');
+      const userName = params.get('userName');
+      const email = params.get('email');
       if (!amount || !userId) {
         return showMessage('Missing amount or userId or phoneNo or payerId', true);
       }
@@ -62,7 +64,7 @@
         PCD_SIMPLE_FLAG : "Y",
 		PCD_PAYER_AUTHTYPE : "pwd",
         PCD_PAYER_ID : payerId,
-        PCD_RST_URL:   `${location.origin}/api/b-callback?userId=${encodeURIComponent(userId)}&paymentId=${encodeURIComponent(paymentId)}`,
+        PCD_RST_URL:`${location.origin}/api/b-callback?userId=${encodeURIComponent(userId)}&paymentId=${encodeURIComponent(paymentId)}&phoneNo=${encodeURIComponent(phoneNO)}&userName=${encodeURIComponent(userName)}&totalAmount=${encodeURIComponent(amount)}&email=${encodeURIComponent(email)}`,
         PCD_PAYER_HP :phoneNO,
         PCD_PAY_OID	:paymentId
   

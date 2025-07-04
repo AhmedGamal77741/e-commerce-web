@@ -90,8 +90,8 @@ exports.handlePassCallback = functions.https.onRequest(async (req, res) => {
     const payReqKey    = String(p.PCD_PAY_REQKEY || '').trim();
     const paymentId    = String(p.paymentId || '').trim();
     const totalPayment = Number(p.PCD_PAY_TOTAL);
-    const cardNumber= String(p.PCD_PAY_CARDNUM);
-    const cardName= String(p.PCD_PAY_CARDNAME);
+    const cardNumber   = String(p.PCD_PAY_CARDNUM);
+    const cardName     = String(p.PCD_PAY_CARDNAME);
 
     if (!userId || !paymentId) {
       return res.status(400).send(`<html><body style="text-align:center;"><h1>❌ Payment Failed</h1><p>Missing user ID or payment ID.</p></body></html>`);
@@ -113,7 +113,7 @@ exports.handlePassCallback = functions.https.onRequest(async (req, res) => {
     if (payResult !== 'success') {
       const msg = p.PCD_PAY_MSG || 'Payment not successful.';
       await pendingOrderDoc.ref.update({ status: 'failed' });
-      return res.status(200).json([p,p]);
+      return res.status(200).json([p, p]);
     }
 
     // Validate required params for requestAuthorization
@@ -128,7 +128,7 @@ exports.handlePassCallback = functions.https.onRequest(async (req, res) => {
     if (!auth.result || String(auth.result).toLowerCase() !== 'success') {
       // Mark pending_order as failed
       await pendingOrderDoc.ref.update({ status: 'failed' });
-      return res.status(500).json([p,auth]);
+      return res.status(500).json([p, auth]);
     }
 
     // Mark the single pending_order as success
@@ -148,20 +148,61 @@ exports.handlePassCallback = functions.https.onRequest(async (req, res) => {
     });
 
     const cardInfo = {};
-if (payerId) cardInfo.payerId = payerId;
-if (cardName) cardInfo.cardName = cardName;
-if (cardNumber) cardInfo.cardNumber = cardNumber;
-if (Object.keys(cardInfo).length > 0) {
-  await userRef.set({ card: cardInfo }, { merge: true });
-}
+    if (payerId) cardInfo.payerId = payerId;
+    if (cardName) cardInfo.cardName = cardName;
+    if (cardNumber) cardInfo.cardNumber = cardNumber;
+    if (Object.keys(cardInfo).length > 0) {
+      await userRef.set({ card: cardInfo }, { merge: true });
+    }
 
-    // Return success page
+    // === Cash Receipt Issuance Logic (Popbill, direct call, parameter-driven) ===
+    const customerName = p.userName || '';
+    const email = p.email || '';
+    const hp = p.phoneNo || '';
+    const itemName = p.productName || p.itemName || '상품';
+    const orderNumber = p.orderNumber || paymentId;
+    const identityNum = hp.replace(/[^0-9]/g, '').slice(-11); // Use phone for 소득공제용
+    const supplyCost = Math.round(totalPayment / 1.1);
+    const tax = totalPayment - supplyCost;
+    // Sanitize paymentId for Popbill mgtKey: only alphanumeric, hyphen, and underscore, max 24 chars
+    let safePaymentId = String(paymentId).replace(/[^a-zA-Z0-9_-]/g, '_');
+    let mgtKeyRaw = `${safePaymentId}_${Date.now()}`;
+    // Popbill mgtKey: 1~24 chars, so truncate if needed
+    let mgtKey = mgtKeyRaw.slice(0, 24);
+
+    let cashReceiptResult = null;
+    try {
+      cashReceiptResult = await issueCashReceiptDirect({
+        mgtKey,
+        tradeDT: new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14),
+        identityNum,
+        supplyCost: String(supplyCost),
+        tax: String(tax),
+        totalAmount: String(totalPayment),
+        itemName,
+        orderNumber,
+        customerName,
+        email,
+        hp
+      });
+    } catch (e) {
+      cashReceiptResult = { success: false, message: e.message };
+    }
+
+    // Return success page with cash receipt result
     return res.status(200).send(`
       <html>
         <head><title>Payment Success</title></head>
         <body style="text-align:center;">
           <h1>✅ Payment Successful</h1>
           <p>Thank you for your order. Your payment was successful.</p>
+          <h2>현금영수증 발행 결과</h2>
+          <p>
+            ${cashReceiptResult && cashReceiptResult.success ?
+              `✅ 현금영수증이 정상 발행되었습니다.<br>메시지: ${cashReceiptResult.message}` :
+              `❌ 현금영수증 발행 실패<br>메시지: ${(cashReceiptResult && cashReceiptResult.message) || '오류'}`
+            }
+          </p>
         </body>
       </html>
     `);
@@ -259,13 +300,54 @@ exports.handleBankPassCallback = functions.https.onRequest(async (req, res) => {
       await userRef.set({ bank: bankInfo }, { merge: true });
     }
 
-    // Return success page
+    // === Cash Receipt Issuance Logic (Popbill, direct call) ===
+    const customerName = p.userName || '';
+    const email = p.email || '';
+    const hp = p.phoneNo || '';
+    const itemName = p.productName || p.itemName || '상품';
+    const orderNumber = p.orderNumber || paymentId;
+    const identityNum = hp.replace(/[^0-9]/g, '').slice(-11); // Use phone for 소득공제용
+    const supplyCost = Math.round(totalPayment / 1.1);
+    const tax = totalPayment - supplyCost;
+    // Sanitize paymentId for Popbill mgtKey: only alphanumeric, hyphen, and underscore, max 24 chars
+    let safePaymentId = String(paymentId).replace(/[^a-zA-Z0-9_-]/g, '_');
+    let mgtKeyRaw = `${safePaymentId}_${Date.now()}`;
+    // Popbill mgtKey: 1~24 chars, so truncate if needed
+    let mgtKey = mgtKeyRaw.slice(0, 24);
+
+    let cashReceiptResult = null;
+    try {
+      cashReceiptResult = await issueCashReceiptDirect({
+        mgtKey,
+        tradeDT: new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14),
+        identityNum,
+        supplyCost: String(supplyCost),
+        tax: String(tax),
+        totalAmount: String(totalPayment),
+        itemName,
+        orderNumber,
+        customerName,
+        email,
+        hp
+      });
+    } catch (e) {
+      cashReceiptResult = { success: false, message: e.message };
+    }
+
+    // Return success page with cash receipt result
     return res.status(200).send(`
       <html>
         <head><title>Payment Success</title></head>
         <body style="text-align:center;">
           <h1>✅ Payment Successful</h1>
           <p>Thank you for your order. Your payment was successful.</p>
+          <h2>현금영수증 발행 결과</h2>
+          <p>
+            ${cashReceiptResult && cashReceiptResult.success ?
+              `✅ 현금영수증이 정상 발행되었습니다.<br>메시지: ${cashReceiptResult.message}` :
+              `❌ 현금영수증 발행 실패<br>메시지: ${(cashReceiptResult && cashReceiptResult.message) || '오류'}`
+            }
+          </p>
         </body>
       </html>
     `);
@@ -304,33 +386,70 @@ async function partnerAuth(workType = 'AUTH') {
   return res.json();
 }
 
+async function cancelAuth(workType = 'AUTH') {
+  const body = {
+    cst_id: PAYPLE_CST_ID,
+    custKey: PAYPLE_CUST_KEY,
+    PCD_PAYCANCEL_FLAG:'Y'
+  };
+  if (workType === 'PUSERDEL') body.PCD_PAY_WORK = 'PUSERDEL';
 
-// exports.authenticatePayple = functions.https.onRequest(async (req, res) => {
-//   try {
-//     const resp = await fetch("https://demo-api.payple.kr/gpay/oauth/1.0/token", {
-//       method: "POST",
-//       headers: {
-//         "Content-Type":  "application/json",
-//         "Cache-Control": "no-cache",
-//         "Referer":       "https://<YOUR_PROJECT>.web.app"
-//       },
-//       body: JSON.stringify({
-//         service_id:  "demo",
-//         service_key: "abcd1234567890",
-//         code:        "as12345678"
-//       })
-//     });
-//     const json = await resp.json();
-//     if (json.result !== "T0000") {
-//       return res.status(400).json(json);
-//     }
-//     // Send back only the access_token
-//     res.json({ accessToken: json.access_token });
-//   } catch (err) {
-//     console.error(err);
-//     res.status(500).send("Internal Server Error");
-//   }
-// });
+  const res = await fetch(`${API_BASE}/auth.php`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Referer': PAYPLE_REFERER
+    },
+    body: JSON.stringify(body)
+  });
+  return res.json();
+}
+
+
+
+
+/**
+ * Payple Partner Authentication (Token Issuance)
+ * Issues a partner access token for Payple settlement API usage.
+ * POST: { service_id, service_key, code } (see Payple docs)
+ * Returns: { accessToken } on success, or error details.
+ */
+exports.paypleSettlementAuth = functions.https.onRequest(async (req, res) => {
+  try {
+    // Only allow POST
+    if (req.method !== 'POST') {
+      return res.status(405).json({ error: 'Method Not Allowed' });
+    }
+    // Parse input
+    const { service_id, service_key, code } = req.body;
+    if (!service_id || !service_key || !code) {
+      return res.status(400).json({ error: 'Missing required fields: service_id, service_key, code' });
+    }
+    // Call Payple partner auth endpoint
+    const response = await fetch('https://demo-api.payple.kr/gpay/oauth/1.0/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache',
+        'Referer': PAYPLE_REFERER
+      },
+      body: JSON.stringify({
+        service_id,
+        service_key,
+        code
+      })
+    });
+    const json = await response.json();
+    if (json.result !== 'T0000') {
+      return res.status(400).json(json);
+    }
+    // Return only the access token
+    return res.json({ accessToken: json.access_token });
+  } catch (err) {
+    console.error('Error in paypleSettlementAuth:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
 
 /**
  * 1) Get Payple Auth Token (HTTP)
@@ -465,7 +584,7 @@ exports.handleBillingCallback = functions.https.onRequest(async (req, res) => {
 //   }
 
 //   const next = admin.firestore.Timestamp.fromDate(
-//     new Date(new Date().setMonth(new Date().getMonth() + 1))
+//     new Date(now.toDate().setMonth(now.toDate().getMonth() + 1))
 //   );
 //   await docRef.update({ nextBillingDate: next });
 //   return { status: 'charged', nextBillingDate: next };
@@ -1091,3 +1210,576 @@ exports.notifyPostComment = onDocumentCreated('posts/{postId}/comments/{commentI
     return null;
   }
 });
+
+/**
+ * 6) Refund Payment (callable)
+ * 
+ * 
+ * Client must pass: orderId (product orderId), refundTotal (amount to refund for this product)
+ * All other sensitive/payment info is fetched from Firestore.
+ */
+exports.requestRefund = functions.https.onCall(async (data, context) => {
+  // Support both direct SDK and HTTP (Postman) calls
+  const payload = data && data.uid ? data : (data && data.data ? data.data : {});
+  let uid = context.auth?.uid;
+  if (!uid) {
+    uid = payload.uid;
+    if (!uid) throw new functions.https.HttpsError('invalid-argument', 'Missing uid (provide in data for unauthenticated test)');
+  }
+
+  const { orderId, refundTotal } = payload;
+  if (!orderId || !refundTotal) {
+    throw new functions.https.HttpsError('invalid-argument', 'Missing orderId or refundTotal');
+  }
+
+  // 1. Fetch the order document
+  const orderSnap = await db.collection('orders').doc(orderId).get();
+  if (!orderSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Order not found');
+  }
+  const order = orderSnap.data();
+  if (order.userId !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'You do not own this order');
+  }
+
+  // 2. Get paymentId from order
+  const paymentId = order.paymentId;
+  if (!paymentId) {
+    throw new functions.https.HttpsError('failed-precondition', 'Order missing paymentId');
+  }
+
+  // 3. Get payment date (required by Payple)
+  let payDate = null;
+  if (order.paymentDate && order.paymentDate.toDate) {
+    payDate = order.paymentDate.toDate().toISOString().slice(0,10).replace(/-/g, '');
+  } else if (order.orderDate) {
+    // fallback: try orderDate string (ISO format)
+    payDate = order.orderDate.replace(/-/g, '').slice(0,8);
+  }
+  if (!payDate) {
+    throw new functions.https.HttpsError('failed-precondition', 'Missing payment date');
+  }
+
+  // 4. Get Payple refund auth
+  const authData = await cancelAuth();
+  if (!authData.result || authData.result.toLowerCase() !== 'success') {
+    throw new functions.https.HttpsError('internal', 'Refund auth failed', authData);
+  }
+
+  // 5. Build refund request body
+  const refundBody = {
+    PCD_CST_ID: authData.cst_id,
+    PCD_CUST_KEY: authData.custKey,
+    PCD_AUTH_KEY: authData.AuthKey,
+    PCD_REFUND_KEY: 'a41ce010ede9fcbfb3be86b24858806596a9db68b79d138b147c3e563e1829a0',
+    PCD_PAYCANCEL_FLAG: 'Y',
+    PCD_PAY_OID: paymentId,
+    PCD_PAY_DATE: payDate,
+    PCD_REFUND_TOTAL: String(refundTotal)
+  };
+
+  // 6. Call Payple refund endpoint
+  const refundRes = await fetch('https://democpay.payple.kr/php/account/api/cPayCAct.php', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache',
+      'Referer': PAYPLE_REFERER
+    },
+    body: JSON.stringify(refundBody)
+  });
+  const refundJson = await refundRes.json();
+  const isSuccess = (refundJson.result && refundJson.result.toLowerCase() === 'success') ||
+                    (refundJson.PCD_PAY_RST && refundJson.PCD_PAY_RST.toLowerCase() === 'success');
+  if (!isSuccess) {
+    throw new functions.https.HttpsError('internal', 'Refund failed', refundJson);
+  }
+
+  // 7. Add back to product stock and delete the order
+  try {
+    const productId = order.productId;
+    const quantityOrdered = order.quantity;
+    if (productId && quantityOrdered) {
+      const productRef = db.collection('products').doc(productId);
+      await productRef.update({
+        stock: admin.firestore.FieldValue.increment(quantityOrdered)
+      });
+    }
+    await db.collection('orders').doc(orderId).delete();
+  } catch (e) {
+    console.error('Error updating stock or deleting order:', e);
+  }
+
+  // 8. Log cancel attempt in Firestore (for audit) as a top-level collection
+  await db.collection('canceled_orders').add({
+    uid,
+    orderId,
+    paymentId,
+    refundTotal,
+    payDate,
+    requestedAt: admin.firestore.Timestamp.now()
+  });
+
+  return { status: 'refunded', refundResult: refundJson };
+});
+
+/**
+ * Payple Settlement: Full Process (Token → Account Verify → Transfer)
+ * POST { bankCode, accountNo, amount, summary, accountName? }
+ * Returns: { token, verify, transfer }
+ */
+
+async function settlementAuth(workType = 'AUTH') {
+  const body = {
+    cst_id: PAYPLE_CST_ID,
+    custKey: PAYPLE_CUST_KEY,
+    code : 'as12345678'
+  };
+  if (workType === 'PUSERDEL') body.PCD_PAY_WORK = 'PUSERDEL';
+
+  const res = await fetch(`https://demohub.payple.kr/oauth/token`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body)
+  });
+  const json = await res.json();
+  // Expect result === 'T0000' for success
+  if (json.result !== 'T0000' || !json.access_token) {
+    throw new Error(`Payple auth failed: ${json.message || 'No access_token'}`);
+  }
+  return json;
+}
+
+async function accountVerification(token , sub_id , bank_code_std , account_num , account_holder_info_type , account_holder_info ) {
+  const body = {
+    cst_id: PAYPLE_CST_ID,
+    custKey: PAYPLE_CUST_KEY,
+    sub_id : sub_id,
+    bank_code_std : bank_code_std,
+    account_num : account_num,
+    account_holder_info_type : account_holder_info_type,
+    account_holder_info : account_holder_info,
+  };
+ 
+
+  const res = await fetch(`https://demohub.payple.kr/inquiry/real_name`, {
+    method: 'POST',
+    headers: {
+     'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body)
+  });
+  return res.json();
+}
+
+
+
+
+exports.paypleSettlement = functions.https.onRequest(async (req, res) => {
+  cors(req, res, async () => {
+    try {
+      // Accept all required params for verification and transfer
+      const {
+        sub_id,
+        bank_code_std,
+        account_num,
+        account_holder_info_type,
+        account_holder_info,
+        amount,
+        summary
+      } = req.body;
+      if (!sub_id || !bank_code_std || !account_num || !account_holder_info_type || !account_holder_info || !amount) {
+        return res.status(400).json({ error: 'Missing required fields' });
+      }
+      // 1. Get partner access token using settlementAuth
+      let tokenJson;
+      try {
+        tokenJson = await settlementAuth();
+      } catch (err) {
+        return res.status(400).json({ step: 'token', error: 'Token issuance failed', details: err.message });
+      }
+      const token = tokenJson.access_token;
+       const body = {
+    cst_id: PAYPLE_CST_ID,
+    custKey: PAYPLE_CUST_KEY,
+    sub_id : sub_id,
+    bank_code_std : bank_code_std,
+    account_num : account_num,
+    account_holder_info_type : account_holder_info_type,
+    account_holder_info : account_holder_info,
+  };
+      // 2. Account Verification (new API)
+      const verifyRes = await fetch(`https://demohub.payple.kr/inquiry/real_name`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`
+
+  },
+  body: JSON.stringify(body)
+});
+const verifyJson = await verifyRes.json();
+
+      if (verifyJson.result !== 'A0000') {
+        return res.status(400).json({ step: 'verify', error: 'Account verification failed', details: verifyJson , token : `Bearer ${token}`});
+      }
+      // 3. Transfer Request to billing key (new API)
+      const distinct_key = Date.now().toString(); // or use a UUID if you prefer
+      const transferBody = {
+        cst_id: PAYPLE_CST_ID,
+        custKey: PAYPLE_CUST_KEY,
+        sub_id: sub_id,
+        distinct_key: distinct_key,
+        billing_tran_id: verifyJson.billing_tran_id,
+        tran_amt: String(amount),
+        print_content: summary || '정산이체'
+      };
+      const transferRes = await fetch('https://demohub.payple.kr/transfer/request', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache'
+        },
+        body: JSON.stringify(transferBody)
+      });
+      const transferJson = await transferRes.json();
+      // Payple transfer success result is 'A0000' (not 'T0000')
+      if (transferJson.result !== 'A0000') {
+        return res.status(400).json({ step: 'transfer', error: 'Transfer failed', details: transferJson });
+      }
+      // 4. Transfer Execution (execute the pending transfer)
+      const executeBody = {
+        cst_id: PAYPLE_CST_ID,
+        custKey: PAYPLE_CUST_KEY,
+        group_key: transferJson.group_key,
+        billing_tran_id: 'ALL', // or transferJson.billing_tran_id for specific
+        execute_type: 'NOW',
+        webhook_url: 'http://pay.pang2chocolate.com/api/webhook'
+      };
+      const executeRes = await fetch('https://demohub.payple.kr/transfer/execute', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache'
+        },
+        body: JSON.stringify(executeBody)
+      });
+      const executeJson = await executeRes.json();
+      // Handle Payple transfer execution result
+      if (executeJson.result !== 'A0000') {
+        // Execution failed
+        return res.status(400).json({ step: 'execute', error: 'Transfer execution failed', details: executeJson });
+      }
+      // Optionally, extract and surface important fields in the response
+      const executionResult = {
+        result: executeJson.result,
+        message: executeJson.message,
+        cst_id: executeJson.cst_id,
+        group_key: executeJson.group_key,
+        billing_tran_id: executeJson.billing_tran_id,
+        tot_tran_amt: executeJson.tot_tran_amt,
+        remain_amt: executeJson.remain_amt,
+        execute_type: executeJson.execute_type,
+        api_tran_dtm: executeJson.api_tran_dtm
+      };
+      // Success: return all results including execution (with parsed executionResult)
+      res.json({ token: tokenJson, verify: verifyJson, transfer: transferJson, execute: executionResult });
+    } catch (e) {
+      console.error('Error in paypleSettlement:', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+});
+
+/**
+ * Payple Transfer Execution Webhook Receiver
+ * Receives POST requests from Payple after transfer execution.
+ * Stores the result in Firestore for audit/history.
+ */
+exports.paypleTransferWebhook = functions.https.onRequest(async (req, res) => {
+  try {
+    if (req.method !== 'POST') {
+      return res.status(405).json({ error: 'Method Not Allowed' });
+    }
+
+    // Payple sends JSON body
+    const data = req.body;
+
+    // Log for debugging
+    console.log('Payple transfer webhook received:', data);
+
+    // Optionally, validate required fields
+    if (!data || !data.result || !data.api_tran_id) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    // Store in Firestore for audit/history (collection: payple_transfer_results)
+    await admin.firestore().collection('payple_transfer_results').doc(data.api_tran_id).set({
+      receivedAt: admin.firestore.FieldValue.serverTimestamp(),
+      ...data
+    });
+
+    // Respond to Payple
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('Error in paypleTransferWebhook:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+
+
+const cashbillService = require('./popbillConfig');
+
+
+exports.issueCashReceipt = functions.https.onRequest(async (req, res) => {
+  const {
+    mgtKey,
+    tradeDT,
+    identityNum,
+    supplyCost,
+    tax,
+    totalAmount,
+    itemName,
+    orderNumber,
+    customerName,
+    email,
+    hp
+  } = req.body;
+
+  const testCorpNum = '4311802323';         // ✅ 사업자번호 (10 digits, no dashes)
+  const userID = 'pang2chocolate';          // ✅ Your Popbill User ID
+  const stateMemo = '발행메모';              // Optional memo
+
+  const cashbill = {
+    mgtKey: mgtKey,
+    tradeDT: tradeDT || new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14),
+    tradeType: '승인거래',
+    taxationType: '과세',
+    tradeUsage: '소득공제용',
+    tradeOpt: '일반',
+    supplyCost: supplyCost,
+    tax: tax,
+    serviceFee: '0',
+    totalAmount: totalAmount,
+    franchiseCorpNum: testCorpNum,
+    franchiseCorpName: '가맹점 상호',
+    franchiseCEOName: '가맹점 대표자 성명',
+    franchiseAddr: '가맹점 주소',
+    franchiseTEL: '01012341234',
+    identityNum: identityNum,
+    itemName: itemName,
+    orderNumber: orderNumber,
+    customerName: customerName,
+    email: email,
+    hp: hp,
+    smssendYN: false
+  };
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      cashbillService.registIssue(testCorpNum, cashbill, stateMemo, resolve, reject);
+    });
+
+    res.status(200).json({
+      success: true,
+      code: result.code,
+      message: result.message
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      code: error.code,
+      message: error.message
+    });
+  }
+});
+
+
+
+exports.getCashReceiptPrintURL = functions.https.onRequest(async (req, res) => {
+  const { mgtKey } = req.body;
+
+  const corpNum = '4311802323';           // Your 사업자번호
+  const userID = 'pang2chocolate';        // Your Popbill user ID
+
+  try {
+    const url = await new Promise((resolve, reject) => {
+      cashbillService.getPrintURL(corpNum, mgtKey, userID, resolve, reject);
+    });
+
+    res.status(200).json({
+      success: true,
+      url: url
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      code: error.code,
+      message: error.message
+    });
+  }
+});
+
+const taxinvoiceService = require('./popbillTaxService');
+
+
+exports.issueTaxInvoice = functions.https.onRequest(async (req, res) => {
+  const corpNum = '4311802323';       // Your 사업자번호 (Popbill test)
+  const userID = 'pang2chocolate';    // Popbill test ID
+
+  const {
+    mgtKey,
+    supplyCostTotal,
+    taxTotal,
+    totalAmount,
+    invoiceeCorpNum,
+    invoiceeCorpName,
+    invoiceeCEOName,
+    invoiceeEmail1,
+    detailList = [],
+  } = req.body;
+
+  const taxInvoice = {
+    writeDate: new Date().toISOString().slice(0, 10).replace(/-/g, ''), // yyyyMMdd
+    chargeDirection: '정과금',
+    issueType: '정발행',
+    purposeType: '영수',
+    taxType: '과세',
+    invoicerCorpNum: corpNum,
+    invoicerMgtKey: mgtKey,
+    invoicerCorpName: 'Your Corp Name',
+    invoicerCEOName: 'CEO Name',
+    invoicerAddr: 'Business Address',
+    invoicerBizClass: '업종',
+    invoicerBizType: '업태',
+    invoicerContactName: '담당자',
+    invoicerTEL: '010-1234-5678',
+    invoicerEmail: 'your@email.com',
+    invoicerSMSSendYN: false,
+
+    invoiceeType: '사업자',
+    invoiceeCorpNum: invoiceeCorpNum,
+    invoiceeCorpName: invoiceeCorpName,
+    invoiceeCEOName: invoiceeCEOName,
+    invoiceeAddr: '받는이 주소',
+    invoiceeBizClass: '받는이 업종',
+    invoiceeBizType: '받는이 업태',
+    invoiceeContactName1: '받는이 담당자',
+    invoiceeTEL1: '010-0000-0000',
+    invoiceeHP1: '010-0000-0000',
+    invoiceeEmail1: invoiceeEmail1,
+    invoiceeSMSSendYN: false,
+
+    supplyCostTotal: supplyCostTotal,
+    taxTotal: taxTotal,
+    totalAmount: totalAmount,
+    remark1: '비고',
+
+    detailList: detailList,
+
+    addContactList: [
+      {
+        serialNum: 1,
+        contactName: '추가담당자',
+        email: invoiceeEmail1,
+      },
+    ],
+  };
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      taxinvoiceService.registIssue(corpNum, taxInvoice, resolve, reject);
+    });
+
+    res.status(200).json({
+      success: true,
+      code: result.code,
+      message: result.message,
+      ntsConfirmNum: result.ntsConfirmNum,
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      code: err.code,
+      message: err.message,
+    });
+  }
+});
+
+
+
+
+
+
+/**
+ * Direct Popbill Cash Receipt Issuance (reusable async function)
+ * Accepts the same params as the HTTP endpoint, returns result object.
+ */
+async function issueCashReceiptDirect({
+  mgtKey,
+  tradeDT,
+  identityNum,
+  supplyCost,
+  tax,
+  totalAmount,
+  itemName,
+  orderNumber,
+  customerName,
+  email,
+  hp
+}) {
+  const cashbillService = require('./popbillConfig');
+  const testCorpNum = '4311802323';         // 사업자번호 (10 digits, no dashes)
+  const stateMemo = '발행메모';              // Optional memo
+
+  const cashbill = {
+    mgtKey: mgtKey,
+    tradeDT: tradeDT || new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14),
+    tradeType: '승인거래',
+    taxationType: '과세',
+    tradeUsage: '소득공제용',
+    tradeOpt: '일반',
+    supplyCost: supplyCost,
+    tax: tax,
+    serviceFee: '0',
+    totalAmount: totalAmount,
+    franchiseCorpNum: testCorpNum,
+    franchiseCorpName: '가맹점 상호',
+    franchiseCEOName: '가맹점 대표자 성명',
+    franchiseAddr: '가맹점 주소',
+    franchiseTEL: '01012341234',
+    identityNum: identityNum,
+    itemName: itemName,
+    orderNumber: orderNumber,
+    customerName: customerName,
+    email: email,
+    hp: hp,
+    smssendYN: false
+  };
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      cashbillService.registIssue(testCorpNum, cashbill, stateMemo, resolve, reject);
+    });
+    return {
+      success: true,
+      code: result.code,
+      message: result.message
+    };
+  } catch (error) {
+    return {
+      success: false,
+      code: error.code,
+      message: error.message
+    };
+  }
+}

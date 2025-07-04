@@ -47,7 +47,9 @@
       const amount = params.get('amount');
       const userId = params.get('userId');
       const phoneNO = params.get('phoneNo');
-      const paymentId = params.get('paymentId')
+      const paymentId = params.get('paymentId');
+      const userName = params.get('userName')
+      const email = params.get('email')
       if (!amount || !userId ||!phoneNO || !paymentId) {
         return showMessage('Missing amount or userId or phoneNo or paymentId', true);
       }
@@ -63,7 +65,7 @@
         PCD_PAY_TOTAL: amount,
         PCD_PAYER_HP :phoneNO,
         PCD_PAY_OID	:paymentId,
-        PCD_RST_URL:  `${location.origin}/api/p-callback?userId=${encodeURIComponent(userId)}&paymentId=${encodeURIComponent(paymentId)}`,
+        PCD_RST_URL:  `${location.origin}/api/p-callback?userId=${encodeURIComponent(userId)}&paymentId=${encodeURIComponent(paymentId)}&phoneNo=${encodeURIComponent(phoneNO)}&userName=${encodeURIComponent(userName)}&totalAmount=${encodeURIComponent(amount)}&email=${encodeURIComponent(email)}`,
   
       };
 
